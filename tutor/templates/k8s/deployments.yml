@@ -387,7 +387,7 @@ spec:
               name: openedx-staticfiles
         - name: init-openedx-staticfiles
           image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_OPENEDX }}
-          args: ['cp', '-r', '/openedx/staticfiles', '/var/www/openedx/']
+          args: ['cp', '-r', '/openedx/staticfiles', '/var/www/openedx/', "&&", "mkdir", "/var/www/openedx-media/"]
           volumeMounts:
             - mountPath: /var/www/openedx/
               name: openedx-staticfiles

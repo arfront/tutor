@@ -29,9 +29,13 @@ spec:
               name: settings-cms
             - mountPath: /openedx/config
               name: config
+            - mountPath: /openedx/media
+              name: media
           resources:
             requests:
               memory: 2Gi
+      imagePullSecrets:
+      - name: harbor
       volumes:
         - name: settings-lms
           configMap:
@@ -42,6 +46,9 @@ spec:
         - name: config
           configMap:
             name: openedx-config
+        - name: media
+          persistentVolumeClaim:
+            claimName: media
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -74,6 +81,10 @@ spec:
               name: settings-cms
             - mountPath: /openedx/config
               name: config
+            - mountPath: /openedx/media
+              name: media
+      imagePullSecrets:
+      - name: harbor
       volumes:
         - name: settings-lms
           configMap:
@@ -84,6 +95,9 @@ spec:
         - name: config
           configMap:
             name: openedx-config
+        - name: media
+          persistentVolumeClaim:
+            claimName: media
 {% if ACTIVATE_FORUM %}
 ---
 apiVersion: apps/v1
@@ -103,7 +117,7 @@ spec:
     spec:
       containers:
         - name: forum
-          image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_FORUM }}
+          image: {{ DOCKER_IMAGE_FORUM }}
           ports:
             - containerPort: 4567
           env:
@@ -115,6 +129,8 @@ spec:
               value: "{{ MONGODB_HOST }}"
             - name: MONGODB_PORT
               value: "{{ MONGODB_PORT }}"
+      imagePullSecrets:
+      - name: harbor
 {% endif %}
 ---
 apiVersion: apps/v1
@@ -144,9 +160,13 @@ spec:
               name: settings-cms
             - mountPath: /openedx/config
               name: config
+            - mountPath: /openedx/media
+              name: media
           resources:
             requests:
               memory: 2Gi
+      imagePullSecrets:
+      - name: harbor
       volumes:
         - name: settings-lms
           configMap:
@@ -157,6 +177,9 @@ spec:
         - name: config
           configMap:
             name: openedx-config
+        - name: media
+          persistentVolumeClaim:
+            claimName: media
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -189,6 +212,10 @@ spec:
               name: settings-cms
             - mountPath: /openedx/config
               name: config
+            - mountPath: /openedx/media
+              name: media
+      imagePullSecrets:
+      - name: harbor
       volumes:
         - name: settings-lms
           configMap:
@@ -199,6 +226,9 @@ spec:
         - name: config
           configMap:
             name: openedx-config
+        - name: media
+          persistentVolumeClaim:
+            claimName: media
 {% if ACTIVATE_ELASTICSEARCH %}
 ---
 apiVersion: apps/v1
@@ -220,7 +250,7 @@ spec:
     spec:
       containers:
         - name: elasticsearch
-          image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_ELASTICSEARCH }}
+          image: {{ DOCKER_IMAGE_ELASTICSEARCH }}
           env:
             - name: ES_JAVA_OPTS
               value: "-Xms1g -Xmx1g"
@@ -257,7 +287,7 @@ spec:
     spec:
       containers:
         - name: memcached
-          image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_MEMCACHED }}
+          image: {{ DOCKER_IMAGE_MEMCACHED }}
           ports:
             - containerPort: 11211
 {% endif %}
@@ -282,7 +312,7 @@ spec:
     spec:
       containers:
         - name: mongodb
-          image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_MONGODB }}
+          image: {{ DOCKER_IMAGE_MONGODB }}
           args: ["mongod", "--smallfiles", "--nojournal", "--storageEngine", "wiredTiger"]
           ports:
             - containerPort: 27017
@@ -315,7 +345,7 @@ spec:
     spec:
       containers:
         - name: mysql
-          image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_MYSQL }}
+          image: {{ DOCKER_IMAGE_MYSQL }}
           {% if ACTIVATE_MYSQL %}
           args: ["mysqld", "--character-set-server=utf8", "--collation-server=utf8_general_ci"]
           {% else %}
@@ -339,29 +369,6 @@ spec:
           persistentVolumeClaim:
             claimName: mysql
             {% endif %}
-{% if ACTIVATE_SMTP %}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: smtp
-  labels:
-    app.kubernetes.io/name: smtp
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: smtp
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: smtp
-    spec:
-      containers:
-        - name: smtp
-          image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_SMTP }}
-          ports:
-            - containerPort: 25
-{% endif %}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -378,6 +385,8 @@ spec:
       labels:
         app.kubernetes.io/name: nginx
     spec:
+      imagePullSecrets:
+      - name: harbor
       initContainers:
         - name: clean-openedx-staticfiles
           image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_OPENEDX }}
@@ -394,7 +403,7 @@ spec:
         {{ patch("k8s-deployments-nginx-init-containers")|indent(8) }}
       containers:
         - name: nginx
-          image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_NGINX }}
+          image: {{ DOCKER_IMAGE_NGINX }}
           volumeMounts:
             - mountPath: /etc/nginx/conf.d/
               name: config
@@ -407,11 +416,17 @@ spec:
             - mountPath: /openedx/data/lms
               name: data-lms
               readOnly: true
+            - mountPath: /var/www/openedx-media
+              name: media
+              readOnly: true
             {{ patch("k8s-deployments-nginx-volume-mounts")|indent(12) }}
           ports:
             - containerPort: 80
             - containerPort: 443
       volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: media
         - name: config
           configMap:
             name: nginx-config
@@ -443,7 +458,7 @@ spec:
     spec:
       containers:
         - name: rabbitmq
-          image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_RABBITMQ }}
+          image: {{ DOCKER_IMAGE_RABBITMQ }}
           ports:
             - containerPort: 5672
           volumeMounts:

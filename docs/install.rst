@@ -1,58 +1,88 @@
 .. _install:
 
-Installation
-============
+Install Tutor
+=============
+
+.. _requirements:
 
 Requirements
 ------------
 
-The only prerequisite for running this is a working docker install. Both docker and docker-compose are required. Follow the instructions from the official documentation:
+* Supported OS: Tutor runs on any 64-bit, UNIX-based system. It was also reported to work on Windows.
+* Required software:
 
-- `Docker <https://docs.docker.com/engine/installation/>`_
-- `Docker compose <https://docs.docker.com/compose/install/>`_
+    - `Docker <https://docs.docker.com/engine/installation/>`__: v18.06.0+
+    - `Docker Compose <https://docs.docker.com/compose/install/>`__: v1.22.0+
 
-⚠️ Warning: do not attempt to simply run ``apt-get install docker docker-compose`` on older Ubuntu platforms, such as 16.04 (Xenial), as you will get older versions of these utilities.
+.. warning::
+    Do not attempt to simply run ``apt-get install docker docker-compose`` on older Ubuntu platforms, such as 16.04 (Xenial), as you will get older versions of these utilities.
 
-Note that the production web server container will bind to port 80 and 443, so if there a web server is running on the same server (Apache or Nginx, for instance), it should be stopped prior to running tutor. Check the section on :ref:`how to setup a web proxy <web_proxy>` for a workaround.
+* Ports 80 and 443 should be open. If other web services run on these ports, check the section on :ref:`how to setup a web proxy <web_proxy>`.
+* Hardware:
 
-With Tutor, Open edX can run on any platform that supports Docker, including Mac OS and Windows. Tutor was tested under various versions of Ubuntu and Mac OS.
+    - Minimum configuration: 4 Gb RAM, 2 CPU, 8 Gb disk space
+    - Recommended configuration: 8 Gb RAM, 4 CPU, 25 Gb disk space
 
-At a minimum, the server running the containers should have 4 Gb of RAM. With less memory, the deployment procedure might crash during migrations (see the :ref:`troubleshooting <migrations_killed>` section) and the platform will be unbearably slow.
+.. note::
+    On Mac OS, by default, containers are allocated 2 GB of RAM, which is not enough. You should follow `these instructions from the official Docker documentation <https://docs.docker.com/docker-for-mac/#advanced>`__ to allocate at least 4-5 Gb to the Docker daemon. If the deployment fails because of insufficient memory during database migrations, check the :ref:`relevant section in the troubleshooting guide <migrations_killed>`.
 
-At least 9Gb of disk space is required.
+.. _install_binary:
 
-Also, the host running the containers should be a 64 bit platform. (images are not built for i386 systems)
-
-Direct binary downloads
------------------------
+Direct binary download
+----------------------
 
 The latest binaries can be downloaded from https://github.com/overhangio/tutor/releases. From the command line:
 
 .. include:: cli_download.rst
 
-This is the recommended installation method for most people.
+This is the simplest and recommended installation method for most people. Note however that you will not be able to use custom plugins with this pre-compiled binary. The only plugins you can use with this approach are those that are already bundled with the binary: see the :ref:`existing plugins <existing_plugins>`.
 
-From source
------------
+.. _install_source:
 
-If you would like to inspect the Tutor source code, you are most welcome to install Tutor from `Pypi <https://pypi.org/project/tutor-openedx/>`_ or directly from `the Github repository <https://github.com/overhangio/tutor>`_. You will need python >= 3.5 and the libyaml development headers. On Ubuntu, these requirements can be installed by running::
+Alternative installation methods
+--------------------------------
+
+If you would like to inspect the Tutor source code, you are most welcome to install Tutor from `Pypi <https://pypi.org/project/tutor-openedx/>`_ or directly from `the Github repository <https://github.com/overhangio/tutor>`_. You will need python >= 3.6 and the libyaml development headers. On Ubuntu, these requirements can be installed by running::
 
     sudo apt install python3 libyaml-dev
 
-Installing from pypi::
+Installing from pypi
+~~~~~~~~~~~~~~~~~~~~
+
+::
 
     pip install tutor-openedx
 
-Installing from a local clone of the repository::
+Installing from source
+~~~~~~~~~~~~~~~~~~~~~~
+
+::
 
     git clone https://github.com/overhangio/tutor
     cd tutor
     pip install -e .
-    
-Cloud deployment
-----------------
 
-    Tutor can be launched on Amazon Web Services very quickly with the `official Tutor AMI <https://aws.amazon.com/marketplace/pp/B07PV3TB8X>`_. Shell access is not even required, as all configuration will happen through the Tutor web user interface. This is a commercial offer priced at $50/month ($500/year) that was created to support the development of Tutor.
+.. _cloud_install:
+  
+Zero-click AWS installation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tutor can be launched on Amazon Web Services very quickly with the `official Tutor AMI <https://aws.amazon.com/marketplace/pp/B07PV3TB8X>`__. Shell access is not required, as all configuration will happen through the Tutor web user interface. For detailed installation instructions, we recommend watching the following video:
+
+.. youtube:: xtXP52qGphA
+
+.. _upgrade:
+
+Upgrading
+---------
+
+With Tutor, it is very easy to upgrade to a more recent Open edX or Tutor release. Just install the latest ``tutor`` version (using either methods above) and run the ``quickstart`` command again. If you have :ref:`customised <configuration_customisation>` your docker images, you will have to re-build them prior to running ``quickstart``.
+
+``quickstart`` should take care of automatically running the upgrade process. If for some reason you need to *manually* upgrade from an Open edX release to the next, you should run ``tutor local upgrade``. For instance, to upgrade from Ironwood to Juniper, run::
+
+    tutor local upgrade --from=ironwood
+
+.. _autocomplete:
 
 Autocomplete
 ------------
@@ -68,3 +98,28 @@ If you are running zsh, run instead::
 After opening a new shell, you can test auto-completion by typing::
 
     tutor <tab><tab>
+
+.. include:: podman.rst
+
+Uninstallation
+--------------
+
+It is fairly easy to completely uninstall Tutor and to delete the Open edX platforms that is running locally.
+
+First of all, stop any locally-running platform::
+    
+    tutor local stop
+    tutor dev stop
+
+Then, delete all data associated to your Open edX platform::
+    
+    # WARNING: this step is irreversible
+    sudo rm -rf "$(tutor config printroot)"
+
+Finally, uninstall Tutor itself::
+    
+    # If you installed tutor from source
+    pip uninstall tutor-openedx
+    
+    # If you downloaded the tutor binary
+    sudo rm /usr/local/bin/tutor

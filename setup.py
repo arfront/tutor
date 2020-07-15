@@ -10,6 +10,11 @@ with io.open(os.path.join(here, "README.rst"), "rt", encoding="utf8") as f:
 about = {}
 with io.open(os.path.join(here, "tutor", "__about__.py"), "rt", encoding="utf-8") as f:
     exec(f.read(), about)
+requirements = []
+with io.open(
+    os.path.join(here, "requirements", "base.in"), "rt", encoding="utf-8"
+) as f:
+    requirements = [line.strip() for line in f]
 
 setup(
     name="tutor-openedx",
@@ -24,12 +29,13 @@ setup(
     license="AGPLv3",
     author="Overhang.io",
     author_email="contact@overhang.io",
-    description="The Open edX distribution for the busy system administrator",
+    description="The docker-based Open edX distribution designed for peace of mind",
     long_description=readme,
+    long_description_content_type="text/x-rst",
     packages=find_packages(exclude=["tests*"]),
     include_package_data=True,
     python_requires=">=3.5",
-    install_requires=["appdirs", "click>=7.0", "click_repl", "jinja2", "pyyaml>=4.2b1"],
+    install_requires=requirements,
     entry_points={"console_scripts": ["tutor=tutor.commands.cli:main"]},
     classifiers=[
         "Development Status :: 5 - Production/Stable",

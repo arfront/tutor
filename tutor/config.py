@@ -1,4 +1,3 @@
-import json
 import os
 
 from . import exceptions
@@ -14,7 +13,7 @@ def update(root):
     Load and save the configuration.
     """
     config, defaults = load_all(root)
-    save(root, config)
+    save_config_file(root, config)
     merge(config, defaults)
     return config
 
@@ -25,6 +24,10 @@ def load(root):
     configuration in the project root.
     """
     check_existing_config(root)
+    return load_no_check(root)
+
+
+def load_no_check(root):
     config, defaults = load_all(root)
     merge(config, defaults)
     return config
@@ -53,7 +56,12 @@ def merge(config, defaults, force=False):
 
 
 def load_defaults():
-    return serialize.load(env.read("config.yml"))
+    return serialize.load(env.read_template_file("config.yml"))
+
+
+def load_config_file(path):
+    with open(path) as f:
+        return serialize.load(f.read())
 
 
 def load_current(root, defaults):
@@ -74,8 +82,7 @@ def load_user(root):
     if not os.path.exists(path):
         return {}
 
-    with open(path) as fi:
-        config = serialize.load(fi.read())
+    config = load_config_file(path)
     upgrade_obsolete(config)
     return config
 
@@ -98,6 +105,7 @@ def load_required(config, defaults):
         "OPENEDX_MYSQL_PASSWORD",
         "ANDROID_OAUTH2_SECRET",
         "ID",
+        "JWT_RSA_PRIVATE_KEY",
     ]:
         if key not in config:
             config[key] = env.render_unknown(config, defaults[key])
@@ -107,24 +115,25 @@ def load_plugins(config, defaults):
     """
     Add, override and set new defaults from plugins.
     """
-    for plugin_name, plugin in plugins.iter_enabled(config):
-        plugin_prefix = plugin_name.upper() + "_"
-        plugin_config = plugins.get_callable_attr(plugin, "config", {})
-
+    for plugin in plugins.iter_enabled(config):
         # Add new config key/values
-        for key, value in plugin_config.get("add", {}).items():
-            new_key = plugin_prefix + key
+        for key, value in plugin.config_add.items():
+            new_key = plugin.config_key(key)
             if new_key not in config:
                 config[new_key] = env.render_unknown(config, value)
 
         # Set existing config key/values: here, we do not override existing values
-        for key, value in plugin_config.get("set", {}).items():
+        for key, value in plugin.config_set.items():
             if key not in config:
                 config[key] = env.render_unknown(config, value)
 
         # Create new defaults
-        for key, value in plugin_config.get("defaults", {}).items():
-            defaults[plugin_prefix + key] = value
+        for key, value in plugin.config_defaults.items():
+            defaults[plugin.config_key(key)] = value
+
+
+def is_service_activated(config, service):
+    return config["ACTIVATE_" + service.upper()]
 
 
 def upgrade_obsolete(config):
@@ -162,16 +171,15 @@ def convert_json2yml(root):
                 root
             )
         )
-    with open(json_path) as fi:
-        config = json.load(fi)
-        save(root, config)
+    config = load_config_file(json_path)
+    save_config_file(root, config)
     os.remove(json_path)
     fmt.echo_info(
         "File config.json detected in {} and converted to config.yml".format(root)
     )
 
 
-def save(root, config):
+def save_config_file(root, config):
     path = config_path(root)
     utils.ensure_file_directory_exists(path)
     with open(path, "w") as of:
@@ -185,7 +193,9 @@ def check_existing_config(root):
     """
     if not os.path.exists(config_path(root)):
         raise exceptions.TutorError(
-            "Project root does not exist. Make sure to generate the initial configuration with `tutor config save --interactive` or `tutor config quickstart` prior to running other commands."
+            "Project root does not exist. Make sure to generate the initial "
+            "configuration with `tutor config save --interactive` or `tutor config "
+            "quickstart` prior to running other commands."
         )
     env.check_is_up_to_date(root)
 

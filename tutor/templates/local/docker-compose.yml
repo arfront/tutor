@@ -1,4 +1,4 @@
-version: "3"
+version: "3.7"
 services:
 
   ############# External services
@@ -19,26 +19,21 @@ services:
       - ../../data/mongodb:/data/db
   {% endif %}
 
+  {% if ACTIVATE_MYSQL %}
   mysql:
     image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_MYSQL }}
-    {% if ACTIVATE_MYSQL %}
     command: mysqld --character-set-server=utf8 --collation-server=utf8_general_ci
-    {% else %}
-    entrypoint: ["sh", "-e", "-c"]
-    command: ["echo 'ready'; while true; do sleep 60; done"]
-    {% endif %}
     restart: unless-stopped
     volumes:
       - ../../data/mysql:/var/lib/mysql
-    env_file: ../apps/mysql/auth.env
+    environment:
+      MYSQL_ROOT_PASSWORD: "{{ MYSQL_ROOT_PASSWORD }}"
+  {% endif %}
 
   {% if ACTIVATE_ELASTICSEARCH %}
   elasticsearch:
     image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_ELASTICSEARCH }}
-    environment:
-      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
-      - "cluster.name=openedx"
-      - "bootstrap.memory_lock=true"
+    command: ["elasticsearch", "-Xms{{ ELASTICSEARCH_HEAP_SIZE }}", "-Xmx{{ ELASTICSEARCH_HEAP_SIZE }}", "--cluster.name=openedx", "--bootstrap.mlockall=true"]
     ulimits:
       memlock:
         soft: -1
@@ -47,31 +42,6 @@ services:
     volumes:
       - ../../data/elasticsearch:/usr/share/elasticsearch/data
   {% endif %}
-
-  openedx-assets:
-    image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_OPENEDX }}
-    volumes:
-      - ../../data/openedx:/var/www/openedx
-    command: sh -c "rm -rf /var/www/openedx/staticfiles && cp -r /openedx/staticfiles/ /var/www/openedx/"
-
-  nginx:
-    image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_NGINX }}
-    restart: unless-stopped
-    ports:
-      - "{{ NGINX_HTTP_PORT }}:80"
-      - "{{ NGINX_HTTPS_PORT }}:443"
-    networks:
-      default:
-        aliases: [{{ patch("local-docker-compose-nginx-aliases", separator=", ") }}]
-    volumes:
-      - ../apps/nginx:/etc/nginx/conf.d/:ro
-      - ../../data/openedx:/var/www/openedx:ro
-      - ../../data/openedx-media:/var/www/openedx-media:ro
-      {% if ACTIVATE_HTTPS %}- ../../data/letsencrypt:/etc/letsencrypt/:ro{% endif %}
-      {{ patch("local-docker-compose-nginx-volumes")|indent(6) }}
-    depends_on:
-      {% if ACTIVATE_LMS %}- lms{% endif %}
-      {% if ACTIVATE_CMS %}- cms {% endif %}
 
   {% if ACTIVATE_RABBITMQ %}
   rabbitmq:
@@ -93,14 +63,12 @@ services:
   forum:
     image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_FORUM }}
     environment:
-      SEARCH_SERVER: "http://{{ ELASTICSEARCH_HOST }}:{{ ELASTICSEARCH_PORT }}"
+      SEARCH_SERVER: "{{ ELASTICSEARCH_SCHEME }}://{{ ELASTICSEARCH_HOST }}:{{ ELASTICSEARCH_PORT }}"
       MONGODB_AUTH: "{% if MONGODB_USERNAME and MONGODB_PASSWORD %}{{ MONGODB_USERNAME}}:{{ MONGODB_PASSWORD }}@{% endif %}"
       MONGODB_HOST: "{{ MONGODB_HOST }}"
       MONGODB_PORT: "{{ MONGODB_PORT }}"
     restart: unless-stopped
-    depends_on:
-      {% if ACTIVATE_ELASTICSEARCH %}- elasticsearch{% endif %}
-      {% if ACTIVATE_MONGODB %}- mongodb{% endif %}
+    depends_on: {{ [("elasticsearch", ACTIVATE_ELASTICSEARCH), ("mongodb", ACTIVATE_MONGODB)]|list_if }}
   {% endif %}
 
   ############# LMS and CMS
@@ -110,6 +78,7 @@ services:
     image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_OPENEDX }}
     environment:
       SERVICE_VARIANT: lms
+      GUNICORN_WORKERS: {{ OPENEDX_LMS_GUNICORN_WORKERS }}
       SETTINGS: ${EDX_PLATFORM_SETTINGS:-tutor.production}
     restart: unless-stopped
     volumes:
@@ -134,6 +103,7 @@ services:
     image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_OPENEDX }}
     environment:
       SERVICE_VARIANT: cms
+      GUNICORN_WORKERS: {{ OPENEDX_CMS_GUNICORN_WORKERS }}
       SETTINGS: ${EDX_PLATFORM_SETTINGS:-tutor.production}
     restart: unless-stopped
     volumes:
@@ -149,19 +119,20 @@ services:
       {% if ACTIVATE_MONGODB %}- mongodb{% endif %}
       {% if ACTIVATE_RABBITMQ %}- rabbitmq{% endif %}
       {% if ACTIVATE_SMTP %}- smtp{% endif %}
+      {% if ACTIVATE_LMS %}- lms{% endif %}
       {{ patch("local-docker-compose-cms-dependencies")|indent(6) }}
   {% endif %}
 
   ############# LMS and CMS workers
 
   {% if ACTIVATE_LMS %}
-  lms_worker:
+  lms-worker:
     image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_OPENEDX }}
     environment:
       SERVICE_VARIANT: lms
       SETTINGS: ${EDX_PLATFORM_SETTINGS:-tutor.production}
       C_FORCE_ROOT: "1" # run celery tasks as root #nofear
-    command: ./manage.py lms celery worker --loglevel=info --hostname=edx.lms.core.default.%%h --maxtasksperchild 100
+    command: ./manage.py lms celery worker --loglevel=info --hostname=edx.lms.core.default.%%h --maxtasksperchild 100 --exclude-queues=edx.cms.core.default
     restart: unless-stopped
     volumes:
       - ../apps/openedx/settings/lms/:/openedx/edx-platform/lms/envs/tutor/
@@ -174,13 +145,13 @@ services:
   {% endif %}
 
   {% if ACTIVATE_CMS %}
-  cms_worker:
+  cms-worker:
     image: {{ DOCKER_REGISTRY }}{{ DOCKER_IMAGE_OPENEDX }}
     environment:
       SERVICE_VARIANT: cms
       SETTINGS: ${EDX_PLATFORM_SETTINGS:-tutor.production}
       C_FORCE_ROOT: "1" # run celery tasks as root #nofear
-    command: ./manage.py cms celery worker --loglevel=info --hostname=edx.cms.core.default.%%h --maxtasksperchild 100
+    command: ./manage.py cms celery worker --loglevel=info --hostname=edx.cms.core.default.%%h --maxtasksperchild 100 --exclude-queues=edx.lms.core.default
     restart: unless-stopped
     volumes:
       - ../apps/openedx/settings/lms/:/openedx/edx-platform/lms/envs/tutor/

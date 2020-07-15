@@ -1,172 +1,85 @@
+import os
 from textwrap import indent
 
 import click
 
+from . import compose
+from .context import Context
 from .. import config as tutor_config
 from .. import env as tutor_env
 from .. import fmt
 from .. import interactive as interactive_config
-from .. import opts
-from .. import scripts
 from .. import utils
 
 
-@click.group(
-    short_help="Run Open edX locally",
-    help="Run Open edX platform locally, with docker-compose.",
-)
-def local():
-    pass
+# pylint: disable=too-few-public-methods
+class LocalContext(Context):
+    @staticmethod
+    def docker_compose(root, config, *command):
+        args = []
+        override_path = tutor_env.pathjoin(root, "local", "docker-compose.override.yml")
+        if os.path.exists(override_path):
+            args += ["-f", override_path]
+        return utils.docker_compose(
+            "-f",
+            tutor_env.pathjoin(root, "local", "docker-compose.yml"),
+            "-f",
+            tutor_env.pathjoin(root, "local", "docker-compose.prod.yml"),
+            *args,
+            "--project-name",
+            config["LOCAL_PROJECT_NAME"],
+            *command
+        )
+
+
+@click.group(help="Run Open edX locally with docker-compose",)
+@click.pass_context
+def local(context):
+    context.obj = LocalContext(context.obj.root)
 
 
 @click.command(help="Configure and run Open edX from scratch")
-@opts.root
 @click.option("-I", "--non-interactive", is_flag=True, help="Run non-interactively")
 @click.option(
     "-p", "--pullimages", "pullimages_", is_flag=True, help="Update docker images"
 )
-def quickstart(root, non_interactive, pullimages_):
+@click.pass_obj
+def quickstart(context, non_interactive, pullimages_):
+    if tutor_env.needs_major_upgrade(context.root):
+        click.echo(fmt.title("Upgrading from an older release"))
+        upgrade.callback(
+            from_version=tutor_env.current_release(context.root),
+            non_interactive=non_interactive,
+        )
+
     click.echo(fmt.title("Interactive platform configuration"))
-    config = interactive_config.update(root, interactive=(not non_interactive))
+    config = interactive_config.update(context.root, interactive=(not non_interactive))
     click.echo(fmt.title("Updating the current environment"))
-    tutor_env.save(root, config)
+    tutor_env.save(context.root, config)
     click.echo(fmt.title("Stopping any existing platform"))
-    stop.callback(root, [])
+    compose.stop.callback([])
     click.echo(fmt.title("HTTPS certificates generation"))
-    https_create.callback(root)
+    https_create.callback()
     if pullimages_:
         click.echo(fmt.title("Docker image updates"))
-        pullimages.callback(root)
+        compose.pullimages.callback()
     click.echo(fmt.title("Starting the platform in detached mode"))
-    start.callback(root, True, [])
+    compose.start.callback(True, [])
     click.echo(fmt.title("Database creation and migrations"))
-    init.callback(root)
-    echo_platform_info(config)
+    compose.init.callback(limit=None)
 
-
-@click.command(help="Update docker images")
-@opts.root
-def pullimages(root):
-    config = tutor_config.load(root)
-    docker_compose(root, config, "pull")
-
-
-@click.command(help="Run all or a selection of configured Open edX services")
-@opts.root
-@click.option("-d", "--detach", is_flag=True, help="Start in daemon mode")
-@click.argument("services", metavar="service", nargs=-1)
-def start(root, detach, services):
-    command = ["up", "--remove-orphans"]
-    if detach:
-        command.append("-d")
-
-    config = tutor_config.load(root)
-    docker_compose(root, config, *command, *services)
-
-
-def echo_platform_info(config):
-    fmt.echo_info("The Open edX platform is now running in detached mode")
-    http = "https" if config["ACTIVATE_HTTPS"] else "http"
-    urls = []
-    if not config["ACTIVATE_HTTPS"] and not config["WEB_PROXY"]:
-        urls += ["http://localhost", "http://studio.localhost"]
-    urls.append("{http}://{lms_host}".format(http=http, lms_host=config["LMS_HOST"]))
-    urls.append("{http}://{cms_host}".format(http=http, cms_host=config["CMS_HOST"]))
     fmt.echo_info(
-        """Your Open edX platform is ready and can be accessed at the following urls:
+        """The Open edX platform is now running in detached mode
+Your Open edX platform is ready and can be accessed at the following urls:
 
-    {}""".format(
-            "\n    ".join(urls)
+    {http}://{lms_host}
+    {http}://{cms_host}
+    """.format(
+            http="https" if config["ACTIVATE_HTTPS"] else "http",
+            lms_host=config["LMS_HOST"],
+            cms_host=config["CMS_HOST"],
         )
     )
-
-
-@click.command(help="Stop a running platform")
-@opts.root
-@click.argument("services", metavar="service", nargs=-1)
-def stop(root, services):
-    config = tutor_config.load(root)
-    docker_compose(root, config, "rm", "--stop", "--force", *services)
-
-
-@click.command(
-    short_help="Reboot an existing platform",
-    help="This is more than just a restart: with reboot, the platform is fully stopped before being restarted again",
-)
-@opts.root
-@click.option("-d", "--detach", is_flag=True, help="Start in daemon mode")
-@click.argument("services", metavar="service", nargs=-1)
-def reboot(root, detach, services):
-    stop.callback(root, services)
-    start.callback(root, detach, services)
-
-
-@click.command(
-    short_help="Restart some components from a running platform.",
-    help="""Specify 'openedx' to restart the lms, cms and workers, or 'all' to
-restart all services. Note that this performs a 'docker-compose restart', so new images
-may not be taken into account. It is useful for reloading settings, for instance. To
-fully stop the platform, use the 'reboot' command.""",
-)
-@opts.root
-@click.argument("service")
-def restart(root, service):
-    config = tutor_config.load(root)
-    command = ["restart"]
-    if service == "openedx":
-        if config["ACTIVATE_LMS"]:
-            command += ["lms", "lms_worker"]
-        if config["ACTIVATE_CMS"]:
-            command += ["cms", "cms_worker"]
-    elif service != "all":
-        command += [service]
-    docker_compose(root, config, *command)
-
-
-@click.command(
-    help="Run a command in one of the containers",
-    context_settings={"ignore_unknown_options": True},
-)
-@opts.root
-@click.option("--entrypoint", help="Override the entrypoint of the image")
-@click.argument("service")
-@click.argument("command", default=None, required=False)
-@click.argument("args", nargs=-1)
-def run(root, entrypoint, service, command, args):
-    run_command = ["run", "--rm"]
-    if entrypoint:
-        run_command += ["--entrypoint", entrypoint]
-    run_command.append(service)
-    if command:
-        run_command.append(command)
-    if args:
-        run_command += args
-    config = tutor_config.load(root)
-    docker_compose(root, config, *run_command)
-
-
-@click.command(
-    help="Exec a command in a running container",
-    context_settings={"ignore_unknown_options": True},
-)
-@opts.root
-@click.argument("service")
-@click.argument("command")
-@click.argument("args", nargs=-1)
-def execute(root, service, command, args):
-    exec_command = ["exec", service, command]
-    if args:
-        exec_command += args
-    config = tutor_config.load(root)
-    docker_compose(root, config, *exec_command)
-
-
-@click.command(help="Initialise all applications")
-@opts.root
-def init(root):
-    config = tutor_config.load(root)
-    runner = ScriptRunner(root, config)
-    scripts.initialise(runner)
 
 
 @click.group(help="Manage https certificates")
@@ -175,8 +88,8 @@ def https():
 
 
 @click.command(help="Create https certificates", name="create")
-@opts.root
-def https_create(root):
+@click.pass_obj
+def https_create(context):
     """
     Note: there are a couple issues with https certificate generation.
     1. Certificates are generated and renewed by using port 80, which is not necessarily open.
@@ -184,8 +97,8 @@ def https_create(root):
         b. It may be occupied by an external web server
     2. On certificate renewal, nginx is not reloaded
     """
-    config = tutor_config.load(root)
-    runner = ScriptRunner(root, config)
+    config = tutor_config.load(context.root)
+    runner = compose.ScriptRunner(context.root, config, context.docker_compose)
     if not config["ACTIVATE_HTTPS"]:
         fmt.echo_info("HTTPS is not activated: certificate generation skipped")
         return
@@ -208,11 +121,11 @@ See the official certbot documentation for your platform: https://certbot.eff.or
 
     utils.docker_run(
         "--volume",
-        "{}:/etc/letsencrypt/".format(tutor_env.data_path(root, "letsencrypt")),
+        "{}:/etc/letsencrypt/".format(tutor_env.data_path(context.root, "letsencrypt")),
         "-p",
         "80:80",
         "--entrypoint=sh",
-        "certbot/certbot:latest",
+        "docker.io/certbot/certbot:latest",
         "-e",
         "-c",
         script,
@@ -220,9 +133,9 @@ See the official certbot documentation for your platform: https://certbot.eff.or
 
 
 @click.command(help="Renew https certificates", name="renew")
-@opts.root
-def https_renew(root):
-    config = tutor_config.load(root)
+@click.pass_obj
+def https_renew(context):
+    config = tutor_config.load(context.root)
     if not config["ACTIVATE_HTTPS"]:
         fmt.echo_info("HTTPS is not activated: certificate renewal skipped")
         return
@@ -239,7 +152,7 @@ See the official certbot documentation for your platform: https://certbot.eff.or
         return
     docker_run = [
         "--volume",
-        "{}:/etc/letsencrypt/".format(tutor_env.data_path(root, "letsencrypt")),
+        "{}:/etc/letsencrypt/".format(tutor_env.data_path(context.root, "letsencrypt")),
         "-p",
         "80:80",
         "certbot/certbot:latest",
@@ -248,115 +161,81 @@ See the official certbot documentation for your platform: https://certbot.eff.or
     utils.docker_run(*docker_run)
 
 
-@click.command(help="View output from containers")
-@opts.root
-@click.option("-f", "--follow", is_flag=True, help="Follow log output")
-@click.option("--tail", type=int, help="Number of lines to show from each container")
-@click.argument("service", nargs=-1)
-def logs(root, follow, tail, service):
-    command = ["logs"]
-    if follow:
-        command += ["--follow"]
-    if tail is not None:
-        command += ["--tail", str(tail)]
-    command += service
-    config = tutor_config.load(root)
-    docker_compose(root, config, *command)
-
-
-@click.command(help="Create an Open edX user and interactively set their password")
-@opts.root
-@click.option("--superuser", is_flag=True, help="Make superuser")
-@click.option("--staff", is_flag=True, help="Make staff user")
+@click.command(help="Upgrade from a previous Open edX named release")
 @click.option(
-    "-p",
-    "--password",
-    help="Specify password from the command line. If undefined, you will be prompted to input a password",
+    "--from", "from_version", default="ironwood", type=click.Choice(["ironwood"])
 )
-@click.argument("name")
-@click.argument("email")
-def createuser(root, superuser, staff, password, name, email):
-    config = tutor_config.load(root)
-    runner = ScriptRunner(root, config)
-    runner.check_service_is_activated("lms")
-    command = scripts.create_user_command(
-        superuser, staff, name, email, password=password
-    )
-    runner.exec("lms", command)
+@click.option("-I", "--non-interactive", is_flag=True, help="Run non-interactively")
+@click.pass_obj
+def upgrade(context, from_version, non_interactive):
+    config = tutor_config.load_no_check(context.root)
 
+    if not non_interactive:
+        question = """You are about to upgrade your Open edX platform. It is strongly recommended to make a backup before upgrading. To do so, run:
 
-@click.command(help="Import the demo course")
-@opts.root
-def importdemocourse(root):
-    config = tutor_config.load(root)
-    runner = ScriptRunner(root, config)
-    fmt.echo_info("Importing demo course")
-    scripts.import_demo_course(runner)
-    fmt.echo_info("Re-indexing courses")
-    indexcourses.callback(root)
+    tutor local stop
+    sudo rsync -avr "$(tutor config printroot)"/ /tmp/tutor-backup/
 
+In case of problem, to restore your backup you will then have to run: sudo rsync -avr /tmp/tutor-backup/ "$(tutor config printroot)"/
 
-@click.command(help="Re-index courses for better searching")
-@opts.root
-def indexcourses(root):
-    config = tutor_config.load(root)
-    runner = ScriptRunner(root, config)
-    scripts.index_courses(runner)
-
-
-@click.command(
-    help="Run Portainer (https://portainer.io), a UI for container supervision",
-    short_help="Run Portainer, a UI for container supervision",
-)
-@opts.root
-@click.option(
-    "-p", "--port", type=int, default=9000, show_default=True, help="Bind port"
-)
-def portainer(root, port):
-    docker_run = [
-        "--volume=/var/run/docker.sock:/var/run/docker.sock",
-        "--volume={}:/data".format(tutor_env.data_path(root, "portainer")),
-        "-p",
-        "{port}:{port}".format(port=port),
-        "portainer/portainer:latest",
-        "--bind=:{}".format(port),
-    ]
-    fmt.echo_info("View the Portainer UI at http://localhost:{port}".format(port=port))
-    utils.docker_run(*docker_run)
-
-
-class ScriptRunner(scripts.BaseRunner):
-    def exec(self, service, command):
-        docker_compose(
-            self.root, self.config, "exec", service, "sh", "-e", "-c", command
+Are you sure you want to continue?"""
+        click.confirm(
+            fmt.question(question), default=True, abort=True, prompt_suffix=" "
         )
 
+    if from_version == "ironwood":
+        upgrade_from_ironwood(context, config)
 
-def docker_compose(root, config, *command):
-    return utils.docker_compose(
-        "-f",
-        tutor_env.pathjoin(root, "local", "docker-compose.yml"),
-        "--project-name",
-        config["LOCAL_PROJECT_NAME"],
-        *command
+
+def upgrade_from_ironwood(context, config):
+    click.echo(fmt.title("Upgrading from Ironwood"))
+    tutor_env.save(context.root, config)
+
+    click.echo(fmt.title("Stopping any existing platform"))
+    compose.stop.callback([])
+
+    if not config["ACTIVATE_MONGODB"]:
+        fmt.echo_info(
+            "You are not running MongDB (ACTIVATE_MONGODB=false). It is your "
+            "responsibility to upgrade your MongoDb instance to v3.6. There is "
+            "nothing left to do."
+        )
+        return
+
+    # Note that the DOCKER_IMAGE_MONGODB value is never saved, because we only save the
+    # environment, not the configuration.
+    click.echo(fmt.title("Upgrading MongoDb from v3.2 to v3.4"))
+    config["DOCKER_IMAGE_MONGODB"] = "mongo:3.4.24"
+    tutor_env.save(context.root, config)
+    compose.start.callback(detach=True, services=["mongodb"])
+    compose.execute.callback(
+        [
+            "mongodb",
+            "mongo",
+            "--eval",
+            'db.adminCommand({ setFeatureCompatibilityVersion: "3.4" })',
+        ]
     )
+    compose.stop.callback([])
+
+    click.echo(fmt.title("Upgrading MongoDb from v3.4 to v3.6"))
+    config["DOCKER_IMAGE_MONGODB"] = "mongo:3.6.18"
+    tutor_env.save(context.root, config)
+    compose.start.callback(detach=True, services=["mongodb"])
+    compose.execute.callback(
+        [
+            "mongodb",
+            "mongo",
+            "--eval",
+            'db.adminCommand({ setFeatureCompatibilityVersion: "3.6" })',
+        ]
+    )
+    compose.stop.callback([])
 
 
 https.add_command(https_create)
 https.add_command(https_renew)
-
-local.add_command(quickstart)
-local.add_command(pullimages)
-local.add_command(start)
-local.add_command(stop)
-local.add_command(restart)
-local.add_command(reboot)
-local.add_command(run)
-local.add_command(execute, name="exec")
-local.add_command(init)
 local.add_command(https)
-local.add_command(logs)
-local.add_command(createuser)
-local.add_command(importdemocourse)
-local.add_command(indexcourses)
-local.add_command(portainer)
+local.add_command(quickstart)
+local.add_command(upgrade)
+compose.add_commands(local)

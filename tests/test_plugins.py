@@ -1,5 +1,5 @@
 import unittest
-import unittest.mock
+from unittest.mock import patch
 
 from tutor import config as tutor_config
 from tutor import exceptions
@@ -10,51 +10,45 @@ class PluginsTests(unittest.TestCase):
     def setUp(self):
         plugins.Plugins.clear()
 
-    def test_iter_installed(self):
-        with unittest.mock.patch.object(
-            plugins.pkg_resources, "iter_entry_points", return_value=[]
-        ):
+    @patch.object(plugins.DictPlugin, "iter_installed", return_value=[])
+    def test_iter_installed(self, _dict_plugin_iter_installed):
+        with patch.object(plugins.pkg_resources, "iter_entry_points", return_value=[]):
             self.assertEqual([], list(plugins.iter_installed()))
 
     def test_is_installed(self):
         self.assertFalse(plugins.is_installed("dummy"))
 
-    def test_extra_installed(self):
-        class plugin1:
-            pass
+    @patch.object(plugins.DictPlugin, "iter_installed", return_value=[])
+    def test_extra_installed(self, _dict_plugin_iter_installed):
+        plugin1 = plugins.BasePlugin("plugin1", None)
+        plugin2 = plugins.BasePlugin("plugin2", None)
 
-        class plugin2:
-            pass
-
-        plugins.Plugins.EXTRA_INSTALLED["plugin1"] = plugin1
-        plugins.Plugins.EXTRA_INSTALLED["plugin2"] = plugin2
-        with unittest.mock.patch.object(
-            plugins.Plugins,
-            "iter_installed_entrypoints",
-            return_value=[("plugin1", plugin1)],
+        plugins.OfficialPlugin.INSTALLED.append(plugin1)
+        plugins.OfficialPlugin.INSTALLED.append(plugin2)
+        with patch.object(
+            plugins.EntrypointPlugin, "iter_installed", return_value=[plugin1],
         ):
             self.assertEqual(
-                [("plugin1", plugin1), ("plugin2", plugin2)],
-                list(plugins.iter_installed()),
+                [plugin1, plugin2], list(plugins.iter_installed()),
             )
 
     def test_enable(self):
         config = {plugins.CONFIG_KEY: []}
-        with unittest.mock.patch.object(plugins, "is_installed", return_value=True):
+        with patch.object(plugins, "is_installed", return_value=True):
             plugins.enable(config, "plugin2")
             plugins.enable(config, "plugin1")
         self.assertEqual(["plugin1", "plugin2"], config[plugins.CONFIG_KEY])
 
     def test_enable_twice(self):
         config = {plugins.CONFIG_KEY: []}
-        with unittest.mock.patch.object(plugins, "is_installed", return_value=True):
+        with patch.object(plugins, "is_installed", return_value=True):
             plugins.enable(config, "plugin1")
             plugins.enable(config, "plugin1")
         self.assertEqual(["plugin1"], config[plugins.CONFIG_KEY])
 
     def test_enable_not_installed_plugin(self):
         config = {"PLUGINS": []}
-        with unittest.mock.patch.object(plugins, "is_installed", return_value=False):
+        with patch.object(plugins, "is_installed", return_value=False):
             self.assertRaises(exceptions.TutorError, plugins.enable, config, "plugin1")
 
     def test_disable(self):
@@ -66,18 +60,19 @@ class PluginsTests(unittest.TestCase):
         class plugin1:
             patches = {"patch1": "Hello {{ ID }}"}
 
-        with unittest.mock.patch.object(
-            plugins.Plugins, "iter_enabled", return_value=[("plugin1", plugin1)]
+        with patch.object(
+            plugins.Plugins,
+            "iter_enabled",
+            return_value=[plugins.BasePlugin("plugin1", plugin1)],
         ):
             patches = list(plugins.iter_patches({}, "patch1"))
         self.assertEqual([("plugin1", "Hello {{ ID }}")], patches)
 
     def test_plugin_without_patches(self):
-        class plugin1:
-            pass
-
-        with unittest.mock.patch.object(
-            plugins.Plugins, "iter_enabled", return_value=[("plugin1", plugin1)]
+        with patch.object(
+            plugins.Plugins,
+            "iter_enabled",
+            return_value=[plugins.BasePlugin("plugin1", None)],
         ):
             patches = list(plugins.iter_patches({}, "patch1"))
         self.assertEqual([], patches)
@@ -93,8 +88,10 @@ class PluginsTests(unittest.TestCase):
                 "defaults": {"PARAM4": "value4"},
             }
 
-        with unittest.mock.patch.object(
-            plugins.Plugins, "iter_enabled", return_value=[("plugin1", plugin1)]
+        with patch.object(
+            plugins.Plugins,
+            "iter_enabled",
+            return_value=[plugins.BasePlugin("plugin1", plugin1)],
         ):
             tutor_config.load_plugins(config, defaults)
 
@@ -115,8 +112,10 @@ class PluginsTests(unittest.TestCase):
         class plugin1:
             config = {"set": {"ID": "newid"}}
 
-        with unittest.mock.patch.object(
-            plugins.Plugins, "iter_enabled", return_value=[("plugin1", plugin1)]
+        with patch.object(
+            plugins.Plugins,
+            "iter_enabled",
+            return_value=[plugins.BasePlugin("plugin1", plugin1)],
         ):
             tutor_config.load_plugins(config, {})
 
@@ -128,8 +127,10 @@ class PluginsTests(unittest.TestCase):
         class plugin1:
             config = {"set": {"PARAM1": "{{ 128|random_string }}"}}
 
-        with unittest.mock.patch.object(
-            plugins.Plugins, "iter_enabled", return_value=[("plugin1", plugin1)]
+        with patch.object(
+            plugins.Plugins,
+            "iter_enabled",
+            return_value=[plugins.BasePlugin("plugin1", plugin1)],
         ):
             tutor_config.load_plugins(config, {})
         self.assertEqual(128, len(config["PARAM1"]))
@@ -141,8 +142,10 @@ class PluginsTests(unittest.TestCase):
         class plugin1:
             config = {"defaults": {"PARAM2": "{{ PARAM1 }}"}}
 
-        with unittest.mock.patch.object(
-            plugins.Plugins, "iter_enabled", return_value=[("plugin1", plugin1)]
+        with patch.object(
+            plugins.Plugins,
+            "iter_enabled",
+            return_value=[plugins.BasePlugin("plugin1", plugin1)],
         ):
             tutor_config.load_plugins(config, defaults)
         self.assertEqual("{{ PARAM1 }}", defaults["PLUGIN1_PARAM2"])
@@ -153,13 +156,17 @@ class PluginsTests(unittest.TestCase):
         class plugin1:
             config = {"add": {"PARAM1": "{{ 10|random_string }}"}}
 
-        with unittest.mock.patch.object(
-            plugins.Plugins, "iter_enabled", return_value=[("plugin1", plugin1)]
+        with patch.object(
+            plugins.Plugins,
+            "iter_enabled",
+            return_value=[plugins.BasePlugin("plugin1", plugin1)],
         ):
             tutor_config.load_plugins(config, {})
         value1 = config["PLUGIN1_PARAM1"]
-        with unittest.mock.patch.object(
-            plugins.Plugins, "iter_enabled", return_value=[("plugin1", plugin1)]
+        with patch.object(
+            plugins.Plugins,
+            "iter_enabled",
+            return_value=[plugins.BasePlugin("plugin1", plugin1)],
         ):
             tutor_config.load_plugins(config, {})
         value2 = config["PLUGIN1_PARAM1"]
@@ -172,31 +179,31 @@ class PluginsTests(unittest.TestCase):
         class plugin1:
             hooks = {"init": ["myclient"]}
 
-        with unittest.mock.patch.object(
-            plugins.Plugins, "iter_enabled", return_value=[("plugin1", plugin1)]
+        with patch.object(
+            plugins.Plugins,
+            "iter_enabled",
+            return_value=[plugins.BasePlugin("plugin1", plugin1)],
         ):
             self.assertEqual(
                 [("plugin1", ["myclient"])], list(plugins.iter_hooks({}, "init"))
             )
 
-    def test_iter_templates(self):
-        class plugin1:
-            templates = "/tmp/templates"
-
-        with unittest.mock.patch.object(
-            plugins.Plugins, "iter_enabled", return_value=[("plugin1", plugin1)]
-        ):
-            self.assertEqual(
-                [("plugin1", "/tmp/templates")], list(plugins.iter_templates({}))
-            )
-
     def test_plugins_are_updated_on_config_change(self):
         config = {"PLUGINS": []}
-        instance1 = plugins.Plugins(config)
-        self.assertEqual(0, len(list(instance1.iter_enabled())))
+        plugins1 = plugins.Plugins(config)
+        self.assertEqual(0, len(list(plugins1.iter_enabled())))
         config["PLUGINS"].append("plugin1")
-        with unittest.mock.patch.object(
-            plugins.Plugins, "iter_installed", return_value=[("plugin1", None)]
+        with patch.object(
+            plugins.Plugins,
+            "iter_installed",
+            return_value=[plugins.BasePlugin("plugin1", None)],
         ):
-            instance2 = plugins.Plugins(config)
-            self.assertEqual(1, len(list(instance2.iter_enabled())))
+            plugins2 = plugins.Plugins(config)
+            self.assertEqual(1, len(list(plugins2.iter_enabled())))
+
+    def test_dict_plugin(self):
+        plugin = plugins.DictPlugin(
+            {"name": "myplugin", "config": {"set": {"KEY": "value"}}, "version": "0.1"}
+        )
+        self.assertEqual("myplugin", plugin.name)
+        self.assertEqual({"KEY": "value"}, plugin.config_set)

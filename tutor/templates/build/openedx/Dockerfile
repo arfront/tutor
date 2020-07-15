@@ -1,4 +1,4 @@
-FROM ubuntu:16.04
+FROM docker.io/ubuntu:16.04
 MAINTAINER Overhang.io <contact@overhang.io>
 
 ############ common to lms & cms
@@ -6,10 +6,19 @@ MAINTAINER Overhang.io <contact@overhang.io>
 # Install system requirements
 RUN apt update && \
     # Global requirements
-    apt install -y language-pack-en git python-virtualenv build-essential software-properties-common curl git-core libxml2-dev libxslt1-dev python-virtualenv libmysqlclient-dev python-apt python-dev libxmlsec1-dev libfreetype6-dev swig gcc g++ \
+    apt install -y language-pack-en git build-essential software-properties-common curl git-core libmysqlclient-dev libxml2-dev libxslt1-dev libxmlsec1-dev libfreetype6-dev swig gcc g++ \
+    # pyenv/python requirements
+    libbz2-dev libreadline-dev \
     # openedx requirements
     gettext gfortran graphviz graphviz-dev libffi-dev libfreetype6-dev libgeos-dev libjpeg8-dev liblapack-dev libpng12-dev libsqlite3-dev libxml2-dev libxmlsec1-dev libxslt1-dev lynx nodejs npm ntp pkg-config \
     && rm -rf /var/lib/apt/lists/*
+ENV LC_ALL en_US.UTF-8
+
+# Install python with pyenv
+ARG PYTHON_VERSION=3.5.9
+ENV PYENV_ROOT /opt/pyenv
+RUN git clone https://github.com/pyenv/pyenv $PYENV_ROOT --branch v1.2.18 --depth 1 \
+    && $PYENV_ROOT/bin/pyenv install $PYTHON_VERSION
 
 # Dockerize will be useful to wait for mysql DB availability
 ARG DOCKERIZE_VERSION=v0.6.1
@@ -19,60 +28,87 @@ RUN curl -L -o /tmp/dockerize.tar.gz https://github.com/jwilder/dockerize/releas
 
 # Checkout edx-platform code
 ARG EDX_PLATFORM_REPOSITORY=https://github.com/edx/edx-platform.git
-ARG EDX_PLATFORM_VERSION=open-release/ironwood.2
+ARG EDX_PLATFORM_VERSION=open-release/juniper.1
 RUN mkdir -p /openedx/edx-platform && \
     git clone $EDX_PLATFORM_REPOSITORY --branch $EDX_PLATFORM_VERSION --depth 1 /openedx/edx-platform
 WORKDIR /openedx/edx-platform
 
-# Apply patches
-# Certificates XSS vulnerability https://github.com/edx/edx-platform/pull/20904
-RUN curl https://github.com/edx/edx-platform/commit/b33db2c548a1a530510d785f7659c78783a187fa.patch | git apply -
-# CustomTagModule mako template injection https://groups.google.com/forum/#!topic/openedx-ops/aVHomKimstU
-RUN curl https://github.com/edx/edx-platform/commit/f9689aadb0f8a41570a4bb76654f980b4e31ad96.patch | git apply -
+# Patch edx-platform
+# Apply xss security fixes https://github.com/edx/edx-platform/pull/24258
+RUN curl https://github.com/overhangio/edx-platform/commit/1ab907b2b019f54450153b08cecb115d668efd25.patch | git apply -
+# Get rid of lepl-related warnings
+# https://github.com/edx/edx-platform/pull/24059 
+# https://github.com/overhangio/edx-platform/tree/overhangio/lepl-rfc6266-warning
+RUN curl https://github.com/overhangio/edx-platform/commit/5f21bbe77056d71ca61b97b6badcff3c1a31b858.patch | git apply -
+# Fix creation of LTI provider objects
+# https://github.com/edx/edx-platform/pull/24055
+# https://github.com/overhangio/edx-platform/tree/regisb/fix-lti-provider-admin
+RUN curl https://github.com/overhangio/edx-platform/commit/089b26eed0302ed1f9a5b24c5f3e563dd44abb04.patch | git apply -
+# Fix problem viewing when CSMH is disabled
+# https://github.com/edx/edx-platform/pull/24237
+# https://github.com/overhangio/edx-platform/tree/overhangio/fix-no-csmh
+RUN curl https://github.com/overhangio/edx-platform/commit/6dbf2eddf7a4563c04c3b51edf5e131106d69e19.patch | git apply -
+# Fix pycontracts version
+# https://github.com/edx/edx-platform/pull/24376
+RUN curl https://github.com/overhangio/edx-platform/commit/226fb100c8f5e1ba66be1e07cf99d3b50ccaf8a4.patch | git apply -
 
-# Download extra locales to /openedx/locale
-# TODO upgrade this to ironwood
+
+# Download extra locales to /openedx/locale/contrib/locale
 RUN cd /tmp \
-    && curl -L -o openedx-i18n.tar.gz https://github.com/openedx/openedx-i18n/archive/hawthorn.tar.gz \
+    && curl -L -o openedx-i18n.tar.gz https://github.com/openedx/openedx-i18n/archive/juniper.1.tar.gz \
     && tar xzf /tmp/openedx-i18n.tar.gz \
-    && mv openedx-i18n-hawthorn/edx-platform/locale/ /openedx/locale/ \
+    && mkdir -p /openedx/locale/contrib \
+    && mv openedx-i18n-juniper.1/edx-platform/locale /openedx/locale/contrib \
     && rm -rf openedx-i18n*
 
-# Install python requirements (clone source repos in a separate dir, otherwise
-# they will be overwritten when we mount edx-platform)
-ENV NO_PYTHON_UNINSTALL 1
-RUN virtualenv /openedx/venv
+# Install python requirements in a virtualenv
+RUN $PYENV_ROOT/versions/$PYTHON_VERSION/bin/pyvenv /openedx/venv
 ENV PATH /openedx/venv/bin:${PATH}
 ENV VIRTUAL_ENV /openedx/venv/
-RUN pip install setuptools==39.0.1 pip==9.0.3
-RUN pip install -r requirements/edx/development.txt
+RUN pip install setuptools==44.1.0 pip==20.0.2 wheel==0.34.2
+RUN pip install -r requirements/edx/base.txt
 
 # Install patched version of ora2
-RUN pip uninstall -y ora2 && \
-    pip install git+https://github.com/overhangio/edx-ora2.git@2.2.0-patched#egg=ora2==2.2.0
+RUN pip install https://github.com/overhangio/edx-ora2/archive/overhangio/boto2to3.zip
 
-# Install patched version of edx-oauth2-provider
-RUN pip install git+https://github.com/overhangio/edx-oauth2-provider.git@1.2.3#egg=edx-oauth2-provider==1.2.3
+# Install scorm xblock
+RUN pip install "openedx-scorm-xblock<11.0.0,>=10.0.0"
 
 # Install a recent version of nodejs
-RUN nodeenv /openedx/nodeenv --node=8.9.3 --prebuilt
+RUN nodeenv /openedx/nodeenv --node=12.13.0 --prebuilt
 ENV PATH /openedx/nodeenv/bin:${PATH}
 
 # Install nodejs requirements
-RUN npm set progress=false \
-    && npm install
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+RUN npm install --verbose --registry=$NPM_REGISTRY
 ENV PATH ./node_modules/.bin:${PATH}
 
 # Install private requirements: this is useful for installing custom xblocks.
 COPY ./requirements/ /openedx/requirements
-RUN cd /openedx/requirements/ && pip install -r ./private.txt
+RUN cd /openedx/requirements/ \
+  && touch ./private.txt \
+  && pip install -r ./private.txt
 
-# Create folder that will store *.env.json and *.auth.json files, as well as
+# Create folder that will store lms/cms.env.json files, as well as
 # the tutor-specific settings files.
 RUN mkdir -p /openedx/config ./lms/envs/tutor ./cms/envs/tutor
-ENV CONFIG_ROOT /openedx/config
+COPY revisions.yml /openedx/config/
+ENV LMS_CFG /openedx/config/lms.env.json
+ENV STUDIO_CFG /openedx/config/cms.env.json
+ENV REVISION_CFG /openedx/config/revisions.yml
 COPY settings/lms/*.py ./lms/envs/tutor/
 COPY settings/cms/*.py ./cms/envs/tutor/
+
+# Copy user-specific locales to /openedx/locale/user/locale and compile them
+RUN mkdir -p /openedx/locale/user
+COPY ./locale/ /openedx/locale/user/locale/
+RUN cd /openedx/locale/user && \
+    django-admin.py compilemessages -v1
+# Compile i18n strings: in Ironwood, js locales are not properly compiled out of the box
+# and we need to do a pass ourselves. Also, we need to compile the djangojs.js files for
+# the downloaded locales.
+RUN ./manage.py lms --settings=tutor.i18n compilejsi18n
+RUN ./manage.py cms --settings=tutor.i18n compilejsi18n
 
 # Copy scripts
 COPY ./bin /openedx/bin
@@ -88,6 +124,11 @@ ENV PATH /openedx/bin:${PATH}
 # and requires a complex settings file. Instead, we decompose the commands
 # and run each one individually to collect the production static assets to
 # /openedx/staticfiles.
+ENV NO_PYTHON_UNINSTALL 1
+ENV NO_PREREQ_INSTALL 1
+# We need to rely on a separate openedx-assets command to accelerate asset processing.
+# For instance, we don't want to run all steps of asset collection every time the theme
+# is modified.
 RUN openedx-assets xmodule \
     && openedx-assets npm \
     && openedx-assets webpack --env=prod \
@@ -105,10 +146,10 @@ ENV SETTINGS tutor.production
 
 {{ patch("openedx-dockerfile") }}
 
-# Entrypoint will fix permissions of all files and run commands as openedx
+# Entrypoint will set right environment variables
 ENTRYPOINT ["docker-entrypoint.sh"]
 
 # Run server
 COPY gunicorn_conf.py /openedx/gunicorn_conf.py
 EXPOSE 8000
-CMD gunicorn -c /openedx/gunicorn_conf.py --name ${SERVICE_VARIANT} --bind=0.0.0.0:8000 --max-requests=1000 ${SERVICE_VARIANT}.wsgi:application
+CMD gunicorn -c /openedx/gunicorn_conf.py --name ${SERVICE_VARIANT} --bind=0.0.0.0:8000 --max-requests=1000 --access-logfile - ${SERVICE_VARIANT}.wsgi:application

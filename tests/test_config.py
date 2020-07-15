@@ -54,7 +54,7 @@ class ConfigTests(unittest.TestCase):
                 password1 = config1["MYSQL_ROOT_PASSWORD"]
 
                 config1.pop("MYSQL_ROOT_PASSWORD")
-                tutor_config.save(root, config1)
+                tutor_config.save_config_file(root, config1)
 
                 mock_random_string.return_value = "efgh"
                 config2, _ = tutor_config.load_all(root)
@@ -72,3 +72,9 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("LMS_HOST", config)
         self.assertEqual("www.myopenedx.com", defaults["LMS_HOST"])
         self.assertEqual("studio.{{ LMS_HOST }}", defaults["CMS_HOST"])
+
+    def test_is_service_activated(self):
+        config = {"ACTIVATE_SERVICE1": True, "ACTIVATE_SERVICE2": False}
+
+        self.assertTrue(tutor_config.is_service_activated(config, "service1"))
+        self.assertFalse(tutor_config.is_service_activated(config, "service2"))

@@ -1,13 +1,38 @@
+import base64
+from crypt import crypt
+from hmac import compare_digest
+import json
 import os
 import random
 import shutil
 import string
+import struct
 import subprocess
+import sys
 
 import click
+from Crypto.PublicKey import RSA
 
 from . import exceptions
 from . import fmt
+
+
+def encrypt(text):
+    """
+    Encrypt some textual content. The method employed is the same as suggested in the
+    `python docs <https://docs.python.org/3/library/crypt.html#examples>`__. The
+    encryption process is compatible with the password verification performed by
+    `htpasswd <https://httpd.apache.org/docs/2.4/programs/htpasswd.html>`__.
+    """
+    hashed = crypt(text)
+    return crypt(text, hashed)
+
+
+def verify_encrypted(encrypted, text):
+    """
+    Return True/False if the encrypted content corresponds to the unencrypted text.
+    """
+    return compare_digest(crypt(text, encrypted), encrypted)
 
 
 def ensure_file_directory_exists(path):
@@ -23,6 +48,10 @@ def random_string(length):
     return "".join(
         [random.choice(string.ascii_letters + string.digits) for _ in range(length)]
     )
+
+
+def list_if(services):
+    return json.dumps([service[0] for service in services if service[1]])
 
 
 def common_domain(d1, d2):
@@ -51,6 +80,41 @@ def reverse_host(domain):
     return ".".join(domain.split(".")[::-1])
 
 
+def rsa_private_key(bits=2048):
+    """
+    Export an RSA private key in PEM format.
+    """
+    key = RSA.generate(bits)
+    return key.export_key().decode()
+
+
+def rsa_import_key(key):
+    """
+    Import PEM-formatted RSA key and return the corresponding object.
+    """
+    return RSA.import_key(key.encode())
+
+
+def long_to_base64(n):
+    """
+    Borrowed from jwkest.__init__
+    """
+
+    def long2intarr(long_int):
+        _bytes = []
+        while long_int:
+            long_int, r = divmod(long_int, 256)
+            _bytes.insert(0, r)
+        return _bytes
+
+    bys = long2intarr(n)
+    data = struct.pack("%sB" % len(bys), *bys)
+    if not data:
+        data = "\x00"
+    s = base64.urlsafe_b64encode(data).rstrip(b"=")
+    return s.decode("ascii")
+
+
 def walk_files(path):
     """
     Iterate on file paths located in directory.
@@ -61,7 +125,10 @@ def walk_files(path):
 
 
 def docker_run(*command):
-    return docker("run", "--rm", "-it", *command)
+    args = ["run", "--rm"]
+    if is_a_tty():
+        args.append("-it")
+    return docker(*args, *command)
 
 
 def docker(*command):
@@ -86,6 +153,14 @@ def kubectl(*command):
             "kubectl is not installed. Please follow instructions from https://kubernetes.io/docs/tasks/tools/install-kubectl/"
         )
     return execute("kubectl", *command)
+
+
+def is_a_tty():
+    """
+    Return True if stdin is able to allocate a tty. Tty allocation sometimes cannot be
+    enabled, for instance in cron jobs
+    """
+    return os.isatty(sys.stdin.fileno())
 
 
 def execute(*command):

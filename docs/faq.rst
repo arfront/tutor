@@ -17,8 +17,8 @@ To make it possible to deploy, administer and upgrade Open edX anywhere, easily.
 
 .. _native:
 
-What's the difference with the official "native" install?
----------------------------------------------------------
+What's the difference with the official "native" installation?
+--------------------------------------------------------------
 
 The `native installation <https://openedx.atlassian.net/wiki/spaces/OpenOPS/pages/146440579/Native+Open+edX+Ubuntu+16.04+64+bit+Installation>`_ maintained by edX relies on `Ansible scripts <https://github.com/edx/configuration/>`_ to deploy Open edX on one or multiple servers. These scripts suffer from a couple issues that Tutor tries to address:
 
@@ -28,7 +28,7 @@ The `native installation <https://openedx.atlassian.net/wiki/spaces/OpenOPS/page
 4. Security: because you are no longer bound to a single OS, with Tutor you are now free to install security-related upgrades as soon as they become available.
 5. Portability: Tutor makes it easy to move your platform from one server to another. Just zip-compress your Tutor project root, send it to another server and you're done.
 
-There are also many features that are not included in the native install, such as a :ref:`web user interface <webui>` for remotely installing the platform, :ref:`Kubernetes deployment <k8s>`, additional languages, etc. You'll discover these differences as you explore Tutor :)
+There are also many features that are not included in the native installation, such as a :ref:`web user interface <webui>` for remotely installing the platform, :ref:`Kubernetes deployment <k8s>`, additional languages, etc. You'll discover these differences as you explore Tutor :)
 
 What's the difference with the official devstack?
 -------------------------------------------------
@@ -43,13 +43,9 @@ No. Tutor is developed independently from edX. That means that the folks at edX.
 What features are missing from Tutor?
 -------------------------------------
 
-Those features are currently not available in Tutor:
+Tutor tries very hard to support all major Open edX features, notably in the form of :ref:`plugins <existing_plugins>`. In particular, the discovery and ecommerce services, once unavailable in Tutor, can now be easily installed via plugins. If you are interested in sponsoring the development of a new plugin, please `get in touch <mailto:worktogether@overhang.io>`__!
 
-- `discovery service <https://github.com/edx/course-discovery/>`_
-- `ecommerce <https://github.com/edx/ecommerce>`_
-- `analytics <https://github.com/edx/edx-analytics-pipeline>`_
-
-Those extra services were considered low priority while developing this project, but we are planning on adding them to Tutor, eventually. If you need one or more of these services, feel free to let me know by opening a `Github issue <https://github.com/overhangio/tutor/issues/>`_. In particular, support for the Analytics stack is going to require a lot of work and I am looking forward to financial sponsorship. Please get in touch if you're interested.
+It should be noted that the `Analytics <https://github.com/edx/edx-analytics-pipeline>`__ stack is currently unsupported, and will likely stay so in the future, as it would require a tremendous amount of work to containerize all the components. For generating great-looking analytics reports, we recommend the `Figures plugin <https://github.com/overhangio/tutor-figures>`__.
 
 Are there people already running this in production?
 ----------------------------------------------------
@@ -59,7 +55,7 @@ Yes, many of them. There is no way to count precisely how many running Open edX 
 Why should I trust software written by some random guy on the Internet?
 -----------------------------------------------------------------------
 
-You shouldn't :) Tutor is actively maintained by `Overhang.io <https://overhang.io>`_, a France-based company founded by `Régis Behmo <https://github.com/regisb/>`_. Régis has been working on Tutor since early 2018; he has been a contributor of the Open edX project since 2015. In particular, he has worked for 2 years on `FUN-MOOC <https://www.fun-mooc.fr/>`_, one of the top 5 largest Open edX platforms in the world. He presented several talks at the Open edX conferences:
+You shouldn't :) Tutor is actively maintained by `Overhang.IO <https://overhang.io>`_, a France-based company founded by `Régis Behmo <https://github.com/regisb/>`_. Régis has been working on Tutor since early 2018; he has been a contributor of the Open edX project since 2015. In particular, he has worked for 2 years at `FUN-MOOC <https://www.fun-mooc.fr/>`_, one of the top 5 largest Open edX platforms in the world. He presented several talks at the Open edX conferences:
 
 - *Deploying a robust, scalable Open edX platform in 1 click (or less) with Tutor*, March 2019 (`video <https://www.youtube.com/watch?v=Oqc7c-3qFc4>`_, `slides <https://regisb.github.io/openedx2019/>`_)
 - *Videofront: a Self-Hosted YouTube*, June 2017 (`video <https://www.youtube.com/watch?v=e7bJchJrmP8&t=5m53s>`__, `slides <http://regisb.github.io/openedx-conference-2017/>`__)

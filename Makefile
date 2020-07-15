@@ -1,18 +1,27 @@
 .DEFAULT_GOAL := help
+.PHONY: docs
 SRC_DIRS = ./tutor ./tests ./bin
 BLACK_OPTS = --exclude templates ${SRC_DIRS}
 
 ###### Development
 
+docs: ## Build html documentation
+	$(MAKE) -C docs
+
 compile-requirements: ## Compile requirements files
-	pip-compile -o requirements/base.txt requirements/base.in
-	pip-compile -o requirements/dev.txt requirements/dev.in
-	pip-compile -o requirements/docs.txt requirements/docs.in
-	
+	pip-compile requirements/base.in
+	pip-compile requirements/dev.in
+	pip-compile requirements/docs.in
+
+upgrade-requirements: ## Upgrade requirements files
+	pip-compile --upgrade requirements/base.in
+	pip-compile --upgrade requirements/dev.in
+	pip-compile --upgrade requirements/docs.in
+
 package: ## Build a package ready to upload to pypi
 	python3 setup.py sdist
 
-test: test-lint test-unit test-format test-packages ## Run all tests by decreasing order or priority
+test: test-lint test-unit test-format test-package ## Run all tests by decreasing order or priority
 
 test-format: ## Run code formatting tests
 	black --check --diff $(BLACK_OPTS)
@@ -23,8 +32,8 @@ test-lint: ## Run code linting tests
 test-unit: ## Run unit tests
 	python3 -m unittest discover tests
 
-test-packages: package ## Test that package can be uploaded to pypi
-	twine check dist/tutor-*.tar.gz
+test-package: package ## Test that package can be uploaded to pypi
+	twine check dist/tutor-openedx-$(shell make version).tar.gz
 
 format: ## Format code automatically
 	black $(BLACK_OPTS)
@@ -48,10 +57,12 @@ retag:
 	git tag $(TAG)
 release-origin:
 	@echo "=== Pushing tag $(TAG) to origin"
+	git push origin
 	git push origin :$(TAG) || true
 	git push origin $(TAG)
 release-overhangio:
 	@echo "=== Pushing tag $(TAG) to overhangio"
+	git push overhangio
 	git push overhangio :$(TAG) || true
 	git push overhangio $(TAG)
 
@@ -61,31 +72,36 @@ ci-info: ## Print info about environment
 	python3 --version
 	pip3 --version
 
-ci-install-dev: ## Install requirements
-	pip3 install -U setuptools twine
+ci-install-alpine-requirements: ## Install requirements for a python:alpine image
+	apk add --no-cache docker gcc libffi-dev libressl-dev musl-dev yaml-dev
+
+ci-install-python-requirements: ## Install requirements
+	pip3 install --upgrade pip
+	pip3 install setuptools==44.0.0
+	pip install .
 	pip3 install -r requirements/dev.txt
+
+ci-install-plugins: ci-install-python-requirements ## Install all supported plugins
 	pip3 install -r requirements/plugins.txt
 
-ci-install:
-	pip3 install -U setuptools twine
-	pip3 install -r requirements/base.txt
-	pip3 install -r requirements/plugins.txt
-
-ci-bundle: ## Create bundle and run basic tests
-	$(MAKE) bundle
-	mkdir -p releases/
+ci-bundle: bundle ## Create bundle and run basic tests
+	ls -lh ./dist/tutor
 	./dist/tutor --version
 	./dist/tutor config printroot
 	yes "" | ./dist/tutor config save --interactive
 	./dist/tutor config save
-	./dist/tutor plugins enable discovery ecommerce minio notes xqueue
+	./dist/tutor plugins list
+	# ./dist/tutor plugins enable discovery ecommerce figures lts minio notes xqueue
+	./dist/tutor plugins enable discovery ecommerce lts minio notes xqueue
+	./dist/tutor plugins list
+	./dist/tutor lts --help
 
 ./releases/github-release: ## Download github-release binary
+	mkdir -p releases/
 	cd releases/ \
-		&& curl -sSL -o ./github-release.tar.bz2 "https://github.com/aktau/github-release/releases/download/v0.7.2/$(shell uname -s | tr "[:upper:]" "[:lower:]")-amd64-github-release.tar.bz2" \
-		&& bzip2 -d -f ./github-release.tar.bz2 \
-		&& tar xf github-release.tar \
-		&& mv "bin/$(shell uname -s | tr "[:upper:]" "[:lower:]")/amd64/github-release" .
+		&& curl -sSL -o ./github-release.bz2 "https://github.com/meterup/github-release/releases/download/v0.7.5/$(shell uname -s | tr "[:upper:]" "[:lower:]")-amd64-github-release.bz2" \
+		&& bzip2 -d -f ./github-release.bz2 \
+		&& chmod a+x ./github-release
 
 ci-github: ./releases/github-release ## Upload assets to github
 	sed "s/TUTOR_VERSION/v$(shell make version)/g" docs/_release_description.md > releases/description.md

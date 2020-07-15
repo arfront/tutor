@@ -2,11 +2,15 @@
 import importlib
 import os
 import pkg_resources
+import wcwidth
 
 block_cipher = None
 
 datas = [("./tutor/templates", "./tutor/templates")]
 hidden_imports = []
+
+# Fix missing wcwidth/version.json file
+datas.append((os.path.dirname(wcwidth.__file__), 'wcwidth'))
 
 # Auto-discover plugins and include patches & templates folders
 for entrypoint in pkg_resources.iter_entry_points("tutor.plugin.v0"):
@@ -19,6 +23,17 @@ for entrypoint in pkg_resources.iter_entry_points("tutor.plugin.v0"):
         path = os.path.join(plugin_root, folder)
         if os.path.exists(path):
             datas.append((path, os.path.join(plugin_root_module_name, folder)))
+# Fix lts import: if we don't declare some modules, pyinstaller does not find them
+hidden_imports.append("tutorlts.__about__")
+hidden_imports.append("Crypto.Cipher.AES")
+hidden_imports.append("Crypto.Cipher.PKCS1_OAEP")
+hidden_imports.append("Crypto.Hash.SHA256")
+hidden_imports.append("Crypto.PublicKey.RSA")
+hidden_imports.append("Crypto.Random")
+hidden_imports.append("Crypto.Signature.PKCS1_v1_5")
+hidden_imports.append("kubernetes")
+hidden_imports.append("uuid")
+
 
 # The following was initially generated with:
 # pyinstaller --onefile --name=tutor --add-data=./tutor/templates:./tutor/templates ./bin/main.py
